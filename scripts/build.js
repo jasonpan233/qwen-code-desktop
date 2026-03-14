@@ -52,19 +52,17 @@ const buildOrder = [
 ];
 
 for (const workspace of buildOrder) {
+  // Skip workspace if package.json doesn't exist
+  const packageJsonPath = join(root, workspace, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    console.log(`Skipping ${workspace} (no package.json found)`);
+    continue;
+  }
+
   execSync(`npm run build --workspace=${workspace}`, {
     stdio: 'inherit',
     cwd: root,
   });
-
-  // After cli is built, generate the JSON Schema for settings
-  // so the vscode-ide-companion extension can provide IntelliSense
-  if (workspace === 'packages/cli') {
-    execSync('npx tsx scripts/generate-settings-schema.ts', {
-      stdio: 'inherit',
-      cwd: root,
-    });
-  }
 }
 
 // also build container image if sandboxing is enabled
