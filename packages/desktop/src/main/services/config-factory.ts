@@ -16,12 +16,119 @@ import {
   FileEncoding,
   DEFAULT_QWEN_EMBEDDING_MODEL,
   AuthType,
+  setGeminiMdFilename as setServerGeminiMdFilename,
+  getAllGeminiMdFilenames,
 } from '@qwen-code/qwen-code-core';
-
 
 /** 通用配置对象类型，键为字符串，值为任意类型。用于表示从 settings.json 解析出的未经类型化的配置数据。 */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySettings = Record<string, any>;
+
+/**
+ * 获取系统级全局 settings.json 路径（企业/系统管理员配置层）。
+ * 优先读取环境变量 QWEN_CODE_SYSTEM_SETTINGS_PATH，否则回退到可执行文件同级目录。
+ * 与 CLI 的 getSystemSettingsPath() 逻辑一致。
+ */
+function getSystemSettingsPath(): string {
+  if (process.env['QWEN_CODE_SYSTEM_SETTINGS_PATH']) {
+    return process.env['QWEN_CODE_SYSTEM_SETTINGS_PATH'];
+  }
+  // 桌面环境中使用 __dirname 同级路径作为系统配置目录
+  return path.join(path.dirname(process.execPath), 'settings.json');
+}
+
+/**
+ * 获取系统默认 settings.json 路径（系统级默认配置，优先级低于用户配置）。
+ * 与 CLI 的 getSystemDefaultsPath() 逻辑一致。
+ */
+function getSystemDefaultsPath(): string {
+  if (process.env['QWEN_CODE_SYSTEM_DEFAULTS_PATH']) {
+    return process.env['QWEN_CODE_SYSTEM_DEFAULTS_PATH'];
+  }
+  return path.join(
+    path.dirname(getSystemSettingsPath()),
+    'system-defaults.json',
+  );
+}
+
+/**
+ * 将相对路径解析为绝对路径（相对于 process.cwd()）。
+ * 与 CLI 的 resolvePath() 逻辑一致，确保 includeDirectories 等配置中的相对路径正确解析。
+ */
+function resolvePath(p: string): string {
+  return path.resolve(process.cwd(), p);
+}
+
+/**
+ * 从环境变量推断 AuthType（当 settings.json 中未显式配置认证类型时的兜底逻辑）。
+ * 检测顺序：QWEN_OAUTH → OpenAI → Gemini → VertexAI → Anthropic。
+ * 与 CLI 的 getAuthTypeFromEnv() 逻辑一致。
+ */
+function getAuthTypeFromEnv(): AuthType | undefined {
+  if (process.env['QWEN_OAUTH']) {
+    return AuthType.QWEN_OAUTH;
+  }
+  if (
+    process.env['OPENAI_API_KEY'] &&
+    process.env['OPENAI_MODEL'] &&
+    process.env['OPENAI_BASE_URL']
+  ) {
+    return AuthType.USE_OPENAI;
+  }
+  if (process.env['GEMINI_API_KEY'] && process.env['GEMINI_MODEL']) {
+    return AuthType.USE_GEMINI;
+  }
+  if (process.env['GOOGLE_API_KEY'] && process.env['GOOGLE_MODEL']) {
+    return AuthType.USE_VERTEX_AI;
+  }
+  if (
+    process.env['ANTHROPIC_API_KEY'] &&
+    process.env['ANTHROPIC_MODEL'] &&
+    process.env['ANTHROPIC_BASE_URL']
+  ) {
+    return AuthType.USE_ANTHROPIC;
+  }
+  return undefined;
+}
+
+/**
+ * 从合并后的 settings 中判断是否启用了文件夹信任功能。
+ * 与 CLI 的 isFolderTrustEnabled() 逻辑一致。
+ */
+function isFolderTrustEnabled(settings: AnySettings): boolean {
+  return settings.security?.folderTrust?.enabled === true;
+}
+
+/**
+ * 判断当前工作区是否受信任。
+ * 桌面应用场景：若未启用 folderTrust 功能，默认视为信任；
+ * 若启用了 folderTrust，则始终视为不信任（桌面版无 IDE trust 状态注入）。
+ * 与 CLI 的 isWorkspaceTrusted() 行为对齐。
+ */
+function isWorkspaceTrustedDesktop(settings: AnySettings): boolean {
+  if (!isFolderTrustEnabled(settings)) {
+    return true;
+  }
+  // 桌面环境中无法依赖 IDE 状态注入，默认不信任未知工作区
+  return false;
+}
+
+/**
+ * 从 settings.env 和 .env 文件加载环境变量（不覆盖已有的 process.env）。
+ * 与 CLI 的 loadEnvironment() 核心逻辑一致，但省略了 Cloud Shell 等 CLI 特有处理。
+ */
+function loadEnvironment(settings: AnySettings): void {
+  // 从 settings.env 加载环境变量（最低优先级），已存在的 process.env 不会被覆盖
+  if (settings.env && typeof settings.env === 'object') {
+    for (const [key, value] of Object.entries(
+      settings.env as Record<string, unknown>,
+    )) {
+      if (!Object.hasOwn(process.env, key) && typeof value === 'string') {
+        process.env[key] = value;
+      }
+    }
+  }
+}
 
 /**
  * 简单的深度合并。workspace settings 覆盖 user settings。
@@ -82,24 +189,50 @@ function readSettingsFile(filePath: string): AnySettings {
 }
 
 /**
- * 加载并合并用户级和工作区级的 settings.json。
- * 合并优先级: workspace > user（工作区覆盖用户级）。
+ * 加载并合并 4 层 settings.json，与 CLI 的 loadSettings() 行为对齐。
+ * 合并优先级（从低到高）：systemDefaults → user → workspace → system。
+ * - systemDefaults: 系统级默认配置（低于用户配置）
+ * - user:           用户全局配置（~/.qwen/settings.json）
+ * - workspace:      工作区配置（<workingDir>/.qwen/settings.json，需信任工作区才生效）
+ * - system:         系统管理员强制配置（最高优先级，覆盖所有用户配置）
+ *
+ * 合并完成后调用 loadEnvironment 将 settings.env 中的环境变量注入到 process.env。
  */
 function loadDesktopSettings(workingDir: string): AnySettings {
-  // 获取用户级全局配置路径（通常为 ~/.qwen/settings.json）
+  // 系统管理员配置层（优先级最高，可被企业管理员用于强制策略）
+  const systemSettingsPath = getSystemSettingsPath();
+  // 系统默认配置层（优先级最低，提供合理默认值）
+  const systemDefaultsPath = getSystemDefaultsPath();
+  // 用户级全局配置路径（通常为 ~/.qwen/settings.json）
   const userSettingsPath = Storage.getGlobalSettingsPath();
-  // 获取工作区级配置路径（通常为 <workingDir>/.qwen/settings.json）
+  // 工作区级配置路径（通常为 <workingDir>/.qwen/settings.json）
   const workspaceSettingsPath = new Storage(
     workingDir,
   ).getWorkspaceSettingsPath();
 
-  // 分别读取用户级和工作区级配置文件
+  // 分别读取各层配置文件
+  const systemDefaultSettings = readSettingsFile(systemDefaultsPath);
   const userSettings = readSettingsFile(userSettingsPath);
   const workspaceSettings = readSettingsFile(workspaceSettingsPath);
+  const systemSettings = readSettingsFile(systemSettingsPath);
 
-  // 深度合并：工作区配置优先级高于用户配置，
-  // 允许用户在项目级别覆盖全局设置（如不同项目使用不同模型或审批模式）
-  return deepMerge(userSettings, workspaceSettings);
+  // 按优先级从低到高依次深度合并：
+  // systemDefaults < user < workspace < system
+  // 工作区配置允许用户在项目级别覆盖全局设置（如不同项目使用不同模型或审批模式）
+  // system 配置作为最高优先级 override，企业管理员可通过它强制锁定某些配置
+  const merged = deepMerge(
+    deepMerge(
+      deepMerge(systemDefaultSettings, userSettings),
+      workspaceSettings,
+    ),
+    systemSettings,
+  );
+
+  // 将 settings.env 中定义的环境变量注入到 process.env（不覆盖已有变量）
+  // 与 CLI 的 loadEnvironment() 行为一致，支持在 settings.json 中配置环境变量
+  loadEnvironment(merged);
+
+  return merged;
 }
 
 /**
@@ -255,25 +388,45 @@ function buildDesktopWebSearchConfig(
  * 从 settings.json 加载配置，对齐 CLI 的配置行为，但去除终端相关选项。
  */
 export async function createDesktopConfig(workingDir: string): Promise<Config> {
-  // 加载并合并用户级和工作区级的 settings.json 配置
-  // 合并逻辑与 CLI 的 loadSettings 保持一致，确保桌面版和 CLI 行为对齐
+  // 加载并合并 4 层 settings.json 配置（systemDefaults < user < workspace < system）
+  // 与 CLI 的 loadSettings() 行为保持一致，确保桌面版和 CLI 行为对齐
   const settings = loadDesktopSettings(workingDir);
 
-  // 自动加载输出语言配置文件（~/.qwen/output-language.md），与 CLI 行为一致。
+  // 差异6：设置 QWEN.md 上下文文件名（与 CLI 的 setServerGeminiMdFilename 逻辑一致）。
+  // 必须在加载记忆文件之前调用，以确保正确识别上下文文件名。
+  if (settings.context?.fileName) {
+    setServerGeminiMdFilename(settings.context.fileName);
+  } else {
+    // 重置为默认文件名列表（QWEN.md、AGENTS.md 等）
+    setServerGeminiMdFilename(getAllGeminiMdFilenames());
+  }
+
+  // 差异3：优先加载项目级 output-language.md，其次全局级，与 CLI 行为一致。
   // 该文件包含用户期望 AI 使用的回复语言（如 "请用中文回答"），
   // 会作为系统提示注入给模型，引导其使用指定语言输出。
-  let outputLanguageFilePath: string | undefined = path.join(
+  const projectOutputLanguagePath = path.join(
+    new Storage(workingDir).getQwenDir(),
+    'output-language.md',
+  );
+  const globalOutputLanguagePath = path.join(
     Storage.getGlobalQwenDir(),
     'output-language.md',
   );
-  if (!fs.existsSync(outputLanguageFilePath)) {
-    outputLanguageFilePath = undefined;
+  let outputLanguageFilePath: string | undefined;
+  if (fs.existsSync(projectOutputLanguagePath)) {
+    // 项目级语言配置优先（允许不同项目使用不同语言）
+    outputLanguageFilePath = projectOutputLanguagePath;
+  } else if (fs.existsSync(globalOutputLanguagePath)) {
+    // 回退到全局用户语言配置
+    outputLanguageFilePath = globalOutputLanguagePath;
   }
 
-  // 从 settings 中解析认证类型（如 qwen-oauth、api-key、openai 等），
-  // 决定与模型服务通信时使用的认证方式
-  const selectedAuthType: AuthType | undefined = settings.security?.auth
-    ?.selectedType as AuthType | undefined;
+  // 差异2：从 settings 中解析认证类型，未显式配置时从环境变量推断（与 CLI 对齐）。
+  // CLI 优先级：argv.authType > settings.selectedType > getAuthTypeFromEnv()
+  // Desktop 优先级：settings.selectedType > getAuthTypeFromEnv()（无 argv）
+  const selectedAuthType: AuthType | undefined =
+    (settings.security?.auth?.selectedType as AuthType | undefined) ||
+    getAuthTypeFromEnv();
 
   // 从环境变量中解析 HTTP/HTTPS 代理地址，与 CLI 使用相同的优先级顺序：
   // HTTPS_PROXY > https_proxy > HTTP_PROXY > http_proxy
@@ -283,6 +436,32 @@ export async function createDesktopConfig(workingDir: string): Promise<Config> {
     process.env['https_proxy'] ||
     process.env['HTTP_PROXY'] ||
     process.env['http_proxy'];
+
+  // 差异4：计算工作区信任状态，与 CLI 的 isWorkspaceTrusted() 行为对齐。
+  // 若未启用 folderTrust 功能，默认视为信任；否则需明确信任才允许执行工具。
+  const trustedFolder = isWorkspaceTrustedDesktop(settings);
+  const folderTrust = settings.security?.folderTrust?.enabled ?? false;
+
+  // 差异4：解析 approvalMode，若工作区不受信任则强制降级为 DEFAULT（安全保护）。
+  // 与 CLI 逻辑一致：未信任的工作区不允许使用 YOLO 或 AUTO_EDIT 等高权限模式。
+  let approvalMode = parseApprovalMode(settings.tools?.approvalMode);
+  if (approvalMode === undefined) {
+    approvalMode = ApprovalMode.DEFAULT;
+  }
+  if (
+    !trustedFolder &&
+    approvalMode !== ApprovalMode.DEFAULT &&
+    approvalMode !== ApprovalMode.PLAN
+  ) {
+    // 未信任工作区：强制回退到 DEFAULT 模式，每次工具调用需用户手动审批
+    approvalMode = ApprovalMode.DEFAULT;
+  }
+
+  // 差异7：对 includeDirectories 中的相对路径执行 resolvePath，确保解析为绝对路径。
+  // 与 CLI 逻辑一致，防止相对路径在不同 cwd 下行为不一致。
+  const includeDirectories = (settings.context?.includeDirectories || []).map(
+    resolvePath,
+  );
 
   const config = new Config({
     // --- Core parameters ---
@@ -294,7 +473,7 @@ export async function createDesktopConfig(workingDir: string): Promise<Config> {
     interactive: true,
     // 调试模式开关，桌面应用默认关闭
     debugMode: false,
-    // 输出语言配置文件路径（~/.qwen/output-language.md），控制 AI 回复的语言
+    // 输出语言配置文件路径（项目级优先，其次全局级），控制 AI 回复的语言
     outputLanguageFilePath,
     // 嵌入模型名称，用于语义搜索和代码检索
     embeddingModel: DEFAULT_QWEN_EMBEDDING_MODEL,
@@ -310,8 +489,8 @@ export async function createDesktopConfig(workingDir: string): Promise<Config> {
     generationConfig: settings.model?.generationConfig,
 
     // --- Approval Mode ---
-    // 工具执行审批模式：plan(仅分析)、default(需审批)、auto-edit(自动批准编辑)、yolo(全自动)
-    approvalMode: parseApprovalMode(settings.tools?.approvalMode),
+    // 工具执行审批模式（已在上方处理信任降级逻辑）
+    approvalMode,
 
     // --- MCP Servers ---
     // MCP (Model Context Protocol) 服务器配置映射，键为服务器名称
@@ -348,8 +527,8 @@ export async function createDesktopConfig(workingDir: string): Promise<Config> {
     // --- File & Context ---
     // 文件过滤配置（是否遵循 .gitignore、.qwenignore、递归搜索、模糊搜索）
     fileFiltering: settings.context?.fileFiltering,
-    // 额外包含的目录列表，这些目录会被加入上下文搜索范围
-    includeDirectories: settings.context?.includeDirectories,
+    // 额外包含的目录列表（已执行 resolvePath 确保为绝对路径）
+    includeDirectories,
     // 是否从 includeDirectories 中加载 QWEN.md 记忆文件
     loadMemoryFromIncludeDirectories:
       settings.context?.loadFromIncludeDirectories || false,
@@ -382,12 +561,11 @@ export async function createDesktopConfig(workingDir: string): Promise<Config> {
     // --- Model behavior ---
     // 跳过 "下一个发言者" 检查，避免多轮对话中不必要的角色切换判断
     skipNextSpeakerCheck: settings.model?.skipNextSpeakerCheck,
-    // 跳过循环检测，避免模型陷入重复操作时被强制中断
-    skipLoopDetection: settings.model?.skipLoopDetection ?? false,
+    // 差异5：skipLoopDetection 默认值与 CLI 对齐（CLI 默认为 true，即默认跳过循环检测）
+    skipLoopDetection: settings.model?.skipLoopDetection ?? true,
     // 跳过启动时的上下文加载（如项目结构摘要），加快启动速度
     skipStartupContext: settings.model?.skipStartupContext ?? false,
-    // VLM（视觉语言模型）切换模式，控制何时启用视觉能力
-    vlmSwitchMode: settings.experimental?.vlmSwitchMode,
+
     // 聊天压缩配置，当上下文过长时自动压缩历史消息
     chatCompression: settings.model?.chatCompression,
     // 工具输出摘要配置，控制对工具输出进行 AI 摘要的 token 预算
@@ -411,7 +589,9 @@ export async function createDesktopConfig(workingDir: string): Promise<Config> {
 
     // --- Security ---
     // 文件夹信任功能开关，未信任的文件夹会限制工具执行权限
-    folderTrust: settings.security?.folderTrust?.enabled ?? false,
+    folderTrust,
+    // 差异4：传入工作区信任状态，与 CLI 行为对齐
+    trustedFolder,
 
     // --- UI & Accessibility ---
     // 无障碍设置（如屏幕阅读器支持、加载动画短语等）
@@ -422,6 +602,23 @@ export async function createDesktopConfig(workingDir: string): Promise<Config> {
     // --- Web Search ---
     // Web 搜索配置（搜索提供商列表和默认提供商：tavily/google/dashscope）
     webSearch: buildDesktopWebSearchConfig(settings, selectedAuthType),
+
+    // --- Hooks ---
+    // 差异8：补充 hooks 配置，与 CLI 行为对齐
+    // hooks: 各事件钩子的处理器定义（如 pre-tool-call、post-tool-call）
+    hooks: settings.hooks,
+    // hooksConfig: 钩子系统全局配置（如是否启用、超时等）
+    hooksConfig: settings.hooksConfig,
+    // enableHooks: 是否启用钩子系统（桌面版直接读取 hooksConfig.enabled，无 --experimental-hooks 标志）
+    enableHooks: settings.hooksConfig?.enabled === true,
+
+    // --- Output ---
+    // 差异9：补充 output.format 配置，与 CLI 行为对齐
+    // 控制桌面端输出格式（如 text、json 等），由 settings.output.format 配置
+    output:
+      settings.output?.format !== undefined
+        ? { format: settings.output.format }
+        : undefined,
   });
 
   return config;
