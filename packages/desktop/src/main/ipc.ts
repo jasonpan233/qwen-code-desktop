@@ -239,6 +239,15 @@ export function setupIpcHandlers(state: AppState): void {
   });
 
   ipcMain.handle(
+    'chat:restore-checkpoint',
+    async (_event, commitHash: string) => {
+      if (state.chatService) {
+        await state.chatService.restoreCheckpoint(commitHash);
+      }
+    },
+  );
+
+  ipcMain.handle(
     'session:list',
     async (_event, options?: ListSessionsOptions) => {
       if (!state.sessionService) {

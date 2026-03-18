@@ -12,7 +12,9 @@ import {
   ScrollText,
   Info,
   Server,
+  Undo2,
 } from 'lucide-react';
+import { useState } from 'react';
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer';
 import { ToolResultRenderer } from '@renderer/components/ToolResultRenderer';
 import { DiffView } from '@renderer/components/DiffView';
@@ -23,12 +25,18 @@ import {
 } from '@renderer/components/ui/collapsible';
 import { Badge } from '@renderer/components/ui/badge';
 import { Button } from '@renderer/components/ui/button';
+import { Spinner } from '@renderer/components/ui/spinner';
 import { cn } from '@renderer/lib/utils';
-import type { ChatMessage as ChatMessageType, ToolCallInfo, ContentBlock } from '@renderer/types';
+import type {
+  ChatMessage as ChatMessageType,
+  ToolCallInfo,
+  ContentBlock,
+} from '@renderer/types';
 
 interface ChatMessageProps {
   message: ChatMessageType;
   onApprove?: (callId: string, outcome: string) => void;
+  onRestore?: (commitHash: string) => Promise<void>;
 }
 
 function ToolCallDisplay({
@@ -101,10 +109,7 @@ function ToolCallDisplay({
         <div className="border-t px-3 py-2 space-y-2">
           {/* 富确认 UI */}
           {toolCall.status === 'awaiting_approval' && (
-            <ToolApprovalContent
-              toolCall={toolCall}
-              onApprove={onApprove}
-            />
+            <ToolApprovalContent toolCall={toolCall} onApprove={onApprove} />
           )}
 
           {/* 实时输出 / 结果展示 */}
@@ -141,7 +146,8 @@ function ToolApprovalContent({
   toolCall: ToolCallInfo;
   onApprove?: (callId: string, outcome: string) => void;
 }) {
-  const handleAction = (outcome: string) => onApprove?.(toolCall.callId, outcome);
+  const handleAction = (outcome: string) =>
+    onApprove?.(toolCall.callId, outcome);
   const type = toolCall.confirmationType;
 
   return (
@@ -199,16 +205,24 @@ function ToolApprovalContent({
             {toolCall.confirmationTitle || '是否继续？'}
           </div>
           {toolCall.confirmationPrompt && (
-            <p className="text-xs text-muted-foreground">{toolCall.confirmationPrompt}</p>
+            <p className="text-xs text-muted-foreground">
+              {toolCall.confirmationPrompt}
+            </p>
           )}
-          {toolCall.confirmationUrls && toolCall.confirmationUrls.length > 0 && (
-            <div className="space-y-0.5">
-              <p className="text-xs text-muted-foreground">URLs:</p>
-              {toolCall.confirmationUrls.map((url, i) => (
-                <p key={i} className="truncate text-xs text-blue-600 dark:text-blue-400">• {url}</p>
-              ))}
-            </div>
-          )}
+          {toolCall.confirmationUrls &&
+            toolCall.confirmationUrls.length > 0 && (
+              <div className="space-y-0.5">
+                <p className="text-xs text-muted-foreground">URLs:</p>
+                {toolCall.confirmationUrls.map((url, i) => (
+                  <p
+                    key={i}
+                    className="truncate text-xs text-blue-600 dark:text-blue-400"
+                  >
+                    • {url}
+                  </p>
+                ))}
+              </div>
+            )}
         </>
       )}
 
@@ -221,9 +235,19 @@ function ToolApprovalContent({
           </div>
           <div className="rounded bg-muted/50 px-2 py-1.5 text-xs space-y-0.5">
             {toolCall.confirmationServerName && (
-              <p className="text-muted-foreground">服务器: <span className="font-medium text-foreground">{toolCall.confirmationServerName}</span></p>
+              <p className="text-muted-foreground">
+                服务器:{' '}
+                <span className="font-medium text-foreground">
+                  {toolCall.confirmationServerName}
+                </span>
+              </p>
             )}
-            <p className="text-muted-foreground">工具: <span className="font-medium text-foreground">{toolCall.confirmationToolDisplayName || toolCall.name}</span></p>
+            <p className="text-muted-foreground">
+              工具:{' '}
+              <span className="font-medium text-foreground">
+                {toolCall.confirmationToolDisplayName || toolCall.name}
+              </span>
+            </p>
           </div>
         </>
       )}
@@ -233,7 +257,9 @@ function ToolApprovalContent({
         <div className="rounded bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
           <p className="font-medium">{toolCall.confirmationTitle}</p>
           {toolCall.confirmationDescription && (
-            <p className="mt-1 text-muted-foreground">{toolCall.confirmationDescription}</p>
+            <p className="mt-1 text-muted-foreground">
+              {toolCall.confirmationDescription}
+            </p>
           )}
         </div>
       )}
@@ -363,26 +389,33 @@ function ContentBlockDisplay({
       return <MarkdownRenderer>{block.text}</MarkdownRenderer>;
     case 'tool_call':
       return (
-        <ToolCallDisplay
-          toolCall={block.toolCall}
-          onApprove={onApprove}
-        />
+        <ToolCallDisplay toolCall={block.toolCall} onApprove={onApprove} />
       );
     default:
       return null;
   }
 }
 
-export function ChatMessage({ message, onApprove }: ChatMessageProps) {
+export function ChatMessage({
+  message,
+  onApprove,
+  onRestore,
+}: ChatMessageProps) {
   const isUser = message.role === 'user';
-  
+  const [isRestoring, setIsRestoring] = useState(false);
+
+  const handleRestore = async () => {
+    if (!message.checkpointCommitHash || !onRestore) return;
+    setIsRestoring(true);
+    try {
+      await onRestore(message.checkpointCommitHash);
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   return (
-    <div
-      className={cn(
-        'group px-4 py-4',
-        isUser ? 'flex justify-end' : ''
-      )}
-    >
+    <div className={cn('group px-4 py-4', isUser ? 'flex justify-end' : '')}>
       {/* 用户消息用 card 包裹，靠右显示 */}
       {isUser ? (
         <div className="max-w-[80%] rounded-lg border bg-card text-card-foreground px-4 py-3 shadow-sm">
@@ -403,6 +436,25 @@ export function ChatMessage({ message, onApprove }: ChatMessageProps) {
                   onApprove={onApprove}
                 />
               ))}
+            </div>
+          )}
+          {/* 回滚按钮：本轮有编辑工具且消息非流式时显示 */}
+          {message.checkpointCommitHash && !message.isStreaming && (
+            <div className="mt-2 flex items-center">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-3 text-xs text-muted-foreground hover:text-destructive"
+                onClick={handleRestore}
+                disabled={isRestoring}
+              >
+                {isRestoring ? (
+                  <Spinner className="mr-1 h-3 w-3" />
+                ) : (
+                  <Undo2 className="mr-1 h-3 w-3" />
+                )}
+                {isRestoring ? '回滚中...' : '回滚修改'}
+              </Button>
             </div>
           )}
         </div>

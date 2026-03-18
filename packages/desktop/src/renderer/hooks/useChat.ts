@@ -408,28 +408,33 @@ export function useChat() {
 
       case 'finished': {
         setIsLoading(false);
+        // 必须在 setMessages 之前捕获 ref 值，
+        // 因为 React 18 会延迟执行 updater，届时 ref 可能已被置 null
+        const finishedAssistantId = currentAssistantIdRef.current;
+        currentAssistantIdRef.current = null;
         setMessages((prev) => {
           const last = prev[prev.length - 1];
           if (
             last &&
-            last.id === currentAssistantIdRef.current &&
+            last.id === finishedAssistantId &&
             last.role === 'assistant'
           ) {
             return [...prev.slice(0, -1), { ...last, isStreaming: false }];
           }
           return prev;
         });
-        currentAssistantIdRef.current = null;
         break;
       }
 
       case 'user-cancelled': {
         setIsLoading(false);
+        const cancelledAssistantId = currentAssistantIdRef.current;
+        currentAssistantIdRef.current = null;
         setMessages((prev) => {
           const last = prev[prev.length - 1];
           if (
             last &&
-            last.id === currentAssistantIdRef.current &&
+            last.id === cancelledAssistantId &&
             last.role === 'assistant'
           ) {
             return [
@@ -443,7 +448,6 @@ export function useChat() {
           }
           return prev;
         });
-        currentAssistantIdRef.current = null;
         break;
       }
 
@@ -453,6 +457,39 @@ export function useChat() {
           contextWindowSize: number;
         };
         setContextUsage(usageData);
+        break;
+      }
+
+      case 'checkpoint-created': {
+        const { commitHash, sessionId } = event.data as {
+          commitHash: string;
+          sessionId: string;
+        };
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (
+            last &&
+            last.id === currentAssistantIdRef.current &&
+            last.role === 'assistant'
+          ) {
+            // 计算当前 assistant 消息的序号（0-based），持久化到 localStorage
+            const assistantIndex =
+              prev.filter((m) => m.role === 'assistant').length - 1;
+            try {
+              const key = `checkpoints:${sessionId}`;
+              const stored = JSON.parse(localStorage.getItem(key) || '{}');
+              stored[assistantIndex] = commitHash;
+              localStorage.setItem(key, JSON.stringify(stored));
+            } catch {
+              /* ignore */
+            }
+            return [
+              ...prev.slice(0, -1),
+              { ...last, checkpointCommitHash: commitHash },
+            ];
+          }
+          return prev;
+        });
         break;
       }
 
@@ -638,6 +675,23 @@ export function useChat() {
         await window.electronAPI.loadSession(sessionId);
       if (sessionData) {
         const chatMessages = buildResumedChatMessages(sessionData);
+        // 从 localStorage 恢复 checkpoint 数据，使历史对话也能显示回滚按钮
+        try {
+          const stored = JSON.parse(
+            localStorage.getItem(`checkpoints:${sessionId}`) || '{}',
+          );
+          let assistantIndex = 0;
+          for (const msg of chatMessages) {
+            if (msg.role === 'assistant') {
+              if (stored[assistantIndex]) {
+                msg.checkpointCommitHash = stored[assistantIndex];
+              }
+              assistantIndex++;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
         setMessages(chatMessages);
         setCurrentSessionId(sessionId);
       }
@@ -645,6 +699,39 @@ export function useChat() {
       setError(err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  /** 回滚项目文件到指定检查点 */
+  const restoreCheckpoint = useCallback(
+    async (commitHash: string) => {
+      try {
+        await window.electronAPI.restoreCheckpoint(commitHash);
+        // 回滚成功后，移除对应消息的 checkpointCommitHash，使按钮消失
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.checkpointCommitHash === commitHash
+              ? { ...m, checkpointCommitHash: undefined }
+              : m,
+          ),
+        );
+        // 同步清理 localStorage
+        if (currentSessionId) {
+          try {
+            const key = `checkpoints:${currentSessionId}`;
+            const stored = JSON.parse(localStorage.getItem(key) || '{}');
+            for (const [idx, hash] of Object.entries(stored)) {
+              if (hash === commitHash) delete stored[idx];
+            }
+            localStorage.setItem(key, JSON.stringify(stored));
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [currentSessionId],
+  );
 
   return {
     messages,
@@ -660,6 +747,7 @@ export function useChat() {
     changeApprovalMode,
     approveTool,
     rejectTool,
+    restoreCheckpoint,
     contextUsage,
     currentModel,
     availableModels,

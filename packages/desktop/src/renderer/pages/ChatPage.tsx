@@ -15,15 +15,40 @@ import { X } from 'lucide-react';
 import { useFileTree } from '@renderer/hooks/useFileTree';
 
 export function ChatPage() {
-  const { messages, isLoading, error, sendMessage, abort, newSession, loadSession, setError, currentSessionId, approvalMode, changeApprovalMode, approveTool, contextUsage, currentModel, availableModels, changeModel } =
-    useChat();
+  const {
+    messages,
+    isLoading,
+    error,
+    sendMessage,
+    abort,
+    newSession,
+    loadSession,
+    setError,
+    currentSessionId,
+    approvalMode,
+    changeApprovalMode,
+    approveTool,
+    restoreCheckpoint,
+    contextUsage,
+    currentModel,
+    availableModels,
+    changeModel,
+  } = useChat();
   const [loginDialogOpen, setLoginDialogOpen] = useState(false);
   const [loginDialogAllowClose, setLoginDialogAllowClose] = useState(false);
   const [currentProject, setCurrentProject] = useState<string | null>(null);
   const [mcpPanelOpen, setMcpPanelOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { servers: mcpServers, loading: mcpLoading, refresh: refreshMcp } = useMcpServers();
-  const { tree: fileTree, loading: fileTreeLoading, refresh: refreshFileTree } = useFileTree();
+  const {
+    servers: mcpServers,
+    loading: mcpLoading,
+    refresh: refreshMcp,
+  } = useMcpServers();
+  const {
+    tree: fileTree,
+    loading: fileTreeLoading,
+    refresh: refreshFileTree,
+  } = useFileTree();
   const chatInputRef = useRef<ChatInputHandle>(null);
 
   const handleAddFileToInput = useCallback((filePath: string) => {
@@ -32,24 +57,32 @@ export function ChatPage() {
 
   // 初始化时获取当前工作目录
   useEffect(() => {
-    window.electronAPI.getCurrentCwd().then((cwd) => {
-      if (cwd) {
-        setCurrentProject(cwd);
-      }
-    }).catch(() => { /* ignore */ });
+    window.electronAPI
+      .getCurrentCwd()
+      .then((cwd) => {
+        if (cwd) {
+          setCurrentProject(cwd);
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
   }, []);
 
   // 检查认证状态，未认证则弹出登录弹窗
   useEffect(() => {
-    window.electronAPI.getDetailedAuthStatus().then(({ authenticated }) => {
-      if (!authenticated) {
+    window.electronAPI
+      .getDetailedAuthStatus()
+      .then(({ authenticated }) => {
+        if (!authenticated) {
+          setLoginDialogAllowClose(false);
+          setLoginDialogOpen(true);
+        }
+      })
+      .catch(() => {
         setLoginDialogAllowClose(false);
         setLoginDialogOpen(true);
-      }
-    }).catch(() => {
-      setLoginDialogAllowClose(false);
-      setLoginDialogOpen(true);
-    });
+      });
   }, []);
 
   // 消息更新自动滚动到底部
@@ -117,6 +150,7 @@ export function ChatPage() {
                   key={msg.id}
                   message={msg}
                   onApprove={approveTool}
+                  onRestore={restoreCheckpoint}
                 />
               ))}
               <div ref={messagesEndRef} />

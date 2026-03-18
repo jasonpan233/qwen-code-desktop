@@ -42,6 +42,8 @@ export interface ChatMessage {
   blocks?: ContentBlock[];
   /** 工具调用信息 - 用于工具状态管理和快速查找 */
   toolCalls?: ToolCallInfo[];
+  /** 本轮 assistant 执行编辑工具前的 git 快照 hash，用于回滚 */
+  checkpointCommitHash?: string;
 }
 
 /** 文件差异展示 */

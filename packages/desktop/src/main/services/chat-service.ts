@@ -56,7 +56,8 @@ export interface ChatStreamEvent {
     | 'user-cancelled'
     | 'session-list-update'
     | 'context-usage'
-    | 'auth-oauth-event';
+    | 'auth-oauth-event'
+    | 'checkpoint-created';
   data: unknown;
 }
 
@@ -670,7 +671,7 @@ export class ChatService {
 
     try {
       // 工具调用循环
-      // eslint-disable-next-line no-constant-condition
+       
       while (true) {
         const toolCallRequests: ToolCallRequestInfo[] = [];
 
@@ -1062,6 +1063,24 @@ export class ChatService {
     }
   }
 
+  /** 编辑类工具名称，用于判断是否需要创建检查点 */
+  private static readonly EDIT_TOOL_NAMES = new Set([
+    'edit',
+    'replace',
+    'write_file',
+  ]);
+
+  /**
+   * 回滚项目文件到指定检查点
+   */
+  async restoreCheckpoint(commitHash: string): Promise<void> {
+    if (!this.config) {
+      throw new Error('Chat service not initialized');
+    }
+    const gitService = await this.config.getGitService();
+    await gitService.restoreProjectFromSnapshot(commitHash);
+  }
+
   /**
    * 执行工具调用并收集响应
    */
@@ -1070,6 +1089,35 @@ export class ChatService {
     signal: AbortSignal,
   ): Promise<Part[]> {
     const responseParts: Part[] = [];
+
+    // 如果本轮包含编辑类工具，在执行前创建 git 快照
+    const hasEditTool = requests.some((r) =>
+      ChatService.EDIT_TOOL_NAMES.has(r.name),
+    );
+    if (hasEditTool) {
+      try {
+        const gitService = await this.config!.getGitService();
+        let commitHash: string | undefined;
+        try {
+          commitHash = await gitService.createFileSnapshot(
+            'Pre-edit checkpoint',
+          );
+        } catch {
+          // 快照创建失败（如 working tree clean），回退到当前 HEAD commit
+        }
+        if (!commitHash) {
+          commitHash = await gitService.getCurrentCommitHash();
+        }
+        if (commitHash) {
+          this.sendToRenderer({
+            type: 'checkpoint-created',
+            data: { commitHash, sessionId: this.config!.getSessionId() },
+          });
+        }
+      } catch {
+        // git 服务不可用时静默跳过，不阻塞工具执行
+      }
+    }
 
     for (const request of requests) {
       // 从工具注册表获取 displayName 和 description

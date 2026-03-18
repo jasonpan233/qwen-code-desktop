@@ -109,7 +109,14 @@ export interface AuthStartResult {
 
 /** OAuth 事件数据 */
 export interface OAuthEventData {
-  status: 'requesting' | 'showing_uri' | 'polling' | 'success' | 'error' | 'timeout' | 'cancelled';
+  status:
+    | 'requesting'
+    | 'showing_uri'
+    | 'polling'
+    | 'success'
+    | 'error'
+    | 'timeout'
+    | 'cancelled';
   verificationUri?: string;
   verificationUriComplete?: string;
   userCode?: string;
@@ -197,6 +204,7 @@ export interface ElectronAPI {
 
   approveTool: (callId: string, outcome?: string) => Promise<void>;
   rejectTool: (callId: string) => Promise<void>;
+  restoreCheckpoint: (commitHash: string) => Promise<void>;
 
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<void>;
@@ -308,6 +316,8 @@ const api: ElectronAPI = {
   approveTool: (callId: string, outcome?: string) =>
     ipcRenderer.invoke('tool:approve', callId, outcome),
   rejectTool: (callId: string) => ipcRenderer.invoke('tool:reject', callId),
+  restoreCheckpoint: (commitHash: string) =>
+    ipcRenderer.invoke('chat:restore-checkpoint', commitHash),
 
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
