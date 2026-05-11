@@ -1,465 +1,133 @@
-<div align="center">
+# Qwen Code Desktop
 
-[![npm version](https://img.shields.io/npm/v/@qwen-code/qwen-code.svg)](https://www.npmjs.com/package/@qwen-code/qwen-code)
-[![License](https://img.shields.io/github/license/QwenLM/qwen-code.svg)](./LICENSE)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
-[![Downloads](https://img.shields.io/npm/dm/@qwen-code/qwen-code.svg)](https://www.npmjs.com/package/@qwen-code/qwen-code)
+Qwen Code Desktop 是 Qwen Code 的桌面端应用。它把 Qwen Code Core 的项目理解、对话、工具调用、会话记录、MCP 和模型配置能力封装进 Electron 桌面界面，让用户可以在图形界面里选择项目目录、登录模型服务、发起代码任务并审批文件编辑或命令执行。
 
-<a href="https://trendshift.io/repositories/15287" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15287" alt="QwenLM%2Fqwen-code | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+本说明只覆盖 `packages/desktop` 桌面应用部分。
 
-**An open-source AI agent that lives in your terminal.**
+## 主要功能
 
-<a href="https://qwenlm.github.io/qwen-code-docs/zh/users/overview">中文</a> |
-<a href="https://qwenlm.github.io/qwen-code-docs/de/users/overview">Deutsch</a> |
-<a href="https://qwenlm.github.io/qwen-code-docs/fr/users/overview">français</a> |
-<a href="https://qwenlm.github.io/qwen-code-docs/ja/users/overview">日本語</a> |
-<a href="https://qwenlm.github.io/qwen-code-docs/ru/users/overview">Русский</a> |
-<a href="https://qwenlm.github.io/qwen-code-docs/pt-BR/users/overview">Português (Brasil)</a>
+- 项目入口：启动后选择项目目录，也可以使用当前默认目录；运行中可切换项目。
+- 对话体验：支持流式回复、思考内容分段、上下文用量展示、中止当前请求和新建对话。
+- 会话管理：左侧栏展示历史会话、消息数量、相对时间和 Git 分支，支持加载和删除会话。
+- 认证方式：支持 Qwen OAuth 登录、百炼 Coding Plan API Key（中国/国际区域）以及自定义 modelProviders 配置。
+- 模型管理：读取当前配置中的模型列表，并在桌面端切换模型。
+- 工具审批：支持 Plan、Default、Auto Edit、YOLO 审批模式；工具调用可展示执行状态、实时输出、diff、计划和结果。
+- 文件上下文：右侧文件树浏览项目文件，可一键把文件路径以 `@path` 形式插入输入框；输入框也支持 `@` 文件引用补全。
+- 附件输入：支持从剪贴板读取图片或文件，图片会作为多模态内容发送，文本文件会读取内容发送。
+- MCP 面板：展示 MCP 服务器连接状态、工具数量和工具说明。
+- 语言与外观：支持浅色、深色、跟随系统主题，以及输出语言偏好设置。
+- 检查点回滚：执行编辑类工具前会尝试创建 Git 快照，界面可触发恢复到对应检查点。
 
-</div>
+## 技术栈
 
-> 🎉 **News (2026-02-16)**: Qwen3.5-Plus is now live! Sign in via Qwen OAuth to use it directly, or get an API key from [Alibaba Cloud ModelStudio](https://modelstudio.console.alibabacloud.com?tab=doc#/doc/?type=model&url=2840914_2&modelId=group-qwen3.5-plus) to access it through the OpenAI-compatible API.
+- 桌面容器：Electron `40.6.1`
+- 打包工具：Electron Forge `7.11.1`
+- 构建工具：Vite `5.4.x`
+- 前端框架：React `19`
+- 语言：TypeScript
+- 样式：Tailwind CSS `4`、Radix UI 风格组件、`class-variance-authority`、`tailwind-merge`
+- 图标：`lucide-react`
+- 内容渲染：`react-markdown`、`remark-gfm`、`react-syntax-highlighter`、`react-diff-view`
+- 核心能力：通过 `@qwen-code/qwen-code-core` 复用 Qwen Code 的配置、认证、模型、会话、工具调用、MCP、Git 快照和文件读取能力。
 
-Qwen Code is an open-source AI agent for the terminal, optimized for [Qwen3-Coder](https://github.com/QwenLM/Qwen3-Coder). It helps you understand large codebases, automate tedious work, and ship faster.
+## 运行与构建
 
-![](https://gw.alicdn.com/imgextra/i1/O1CN01D2DviS1wwtEtMwIzJ_!!6000000006373-2-tps-1600-900.png)
-
-## Why Qwen Code?
-
-- **Multi-protocol, OAuth free tier**: use OpenAI / Anthropic / Gemini-compatible APIs, or sign in with Qwen OAuth for 1,000 free requests/day.
-- **Open-source, co-evolving**: both the framework and the Qwen3-Coder model are open-source—and they ship and evolve together.
-- **Agentic workflow, feature-rich**: rich built-in tools (Skills, SubAgents) for a full agentic workflow and a Claude Code-like experience.
-- **Terminal-first, IDE-friendly**: built for developers who live in the command line, with optional integration for VS Code, Zed, and JetBrains IDEs.
-
-## Installation
-
-### Quick Install (Recommended)
-
-#### Linux / macOS
+项目使用 npm workspaces。建议在仓库根目录安装依赖：
 
 ```bash
-bash -c "$(curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.sh)"
+npm install
 ```
 
-#### Windows (Run as Administrator CMD)
-
-```cmd
-curl -fsSL -o %TEMP%\install-qwen.bat https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.bat && %TEMP%\install-qwen.bat
-```
-
-> **Note**: It's recommended to restart your terminal after installation to ensure environment variables take effect.
-
-### Manual Installation
-
-#### Prerequisites
-
-Make sure you have Node.js 20 or later installed. Download it from [nodejs.org](https://nodejs.org/en/download).
-
-#### NPM
+启动桌面开发环境：
 
 ```bash
-npm install -g @qwen-code/qwen-code@latest
+npm --workspace=@qwen-code/desktop run start
 ```
 
-#### Homebrew (macOS, Linux)
+也可以进入桌面包目录运行：
 
 ```bash
-brew install qwen-code
+cd packages/desktop
+npm run start
 ```
 
-## Quick Start
+打包当前平台的应用目录：
 
 ```bash
-# Start Qwen Code (interactive)
-qwen
-
-# Then, in the session:
-/help
-/auth
+npm --workspace=@qwen-code/desktop run package
 ```
 
-On first use, you'll be prompted to sign in. You can run `/auth` anytime to switch authentication methods.
+生成安装包：
 
-Example prompts:
+```bash
+npm --workspace=@qwen-code/desktop run make
+```
+
+发布构建产物：
+
+```bash
+npm --workspace=@qwen-code/desktop run publish
+```
+
+运行桌面包 lint：
+
+```bash
+npm --workspace=@qwen-code/desktop run lint
+```
+
+## 桌面目录结构
 
 ```text
-What does this project do?
-Explain the codebase structure.
-Help me refactor this function.
-Generate unit tests for this module.
+packages/desktop/
+├── forge.config.ts              # Electron Forge 配置，声明 main/preload/renderer 的 Vite 构建和安装包 maker
+├── vite.main.config.ts          # 主进程 Vite 配置
+├── vite.preload.config.ts       # preload Vite 配置，输出 CJS preload
+├── vite.renderer.config.ts      # 渲染进程 Vite 配置
+├── index.html                   # 渲染进程 HTML 入口
+├── src/
+│   ├── main/
+│   │   ├── main.ts              # Electron 主进程入口，创建 BrowserWindow 并注册 IPC
+│   │   ├── ipc.ts               # IPC 处理器：聊天、会话、认证、工具审批、文件、MCP、模型、语言等
+│   │   ├── Command/initCommand.ts
+│   │   ├── constants/
+│   │   └── services/
+│   │       ├── chat-service.ts  # 桌面端 ChatService，桥接渲染器与 qwen-code-core
+│   │       ├── config-factory.ts # 桌面 Config 创建与 settings 合并逻辑
+│   │       └── language-utils.ts # 输出语言偏好读写
+│   ├── preload/
+│   │   └── preload.ts           # 通过 contextBridge 暴露安全的 window.electronAPI
+│   └── renderer/
+│       ├── App.tsx              # React 路由入口
+│       ├── index.tsx            # 渲染进程入口
+│       ├── pages/               # ProjectPicker、ChatPage
+│       ├── components/          # 聊天、侧栏、登录、文件树、MCP、Markdown、Diff 等组件
+│       ├── hooks/               # useChat、useSessionList、useFileTree、useMcpServers
+│       ├── lib/
+│       └── types/
+└── package.json                 # desktop 包脚本和依赖
 ```
 
-<details>
-<summary>Click to watch a demo video</summary>
+## 架构说明
 
-<video src="https://cloud.video.taobao.com/vod/HLfyppnCHplRV9Qhz2xSqeazHeRzYtG-EYJnHAqtzkQ.mp4" controls>
-Your browser does not support the video tag.
-</video>
+桌面应用由三层组成：
 
-</details>
+1. 主进程负责 Electron 窗口生命周期、系统能力和 IPC 处理。`src/main/main.ts` 创建窗口，`src/main/ipc.ts` 注册渲染器可调用的能力。
+2. Preload 层通过 `contextBridge.exposeInMainWorld('electronAPI', api)` 暴露受控 API，渲染器不直接访问 Node/Electron 主进程能力。
+3. 渲染器是 React 应用，使用 HashRouter 在项目选择页和聊天页之间切换。聊天页组合侧边栏、消息区、输入框、文件树和 MCP 面板。
 
-## Authentication
+`ChatService` 是桌面端和 `@qwen-code/qwen-code-core` 的主要桥接层。它负责初始化 `Config` 和 `GeminiClient`，处理认证、流式消息、工具调用循环、工具审批、`@` 文件引用、附件转 Gemini Part、MCP 状态、模型切换、会话恢复和 Git 检查点。
 
-Qwen Code supports two authentication methods:
+## 配置与数据
 
-- **Qwen OAuth (recommended & free)**: sign in with your `qwen.ai` account in a browser.
-- **API-KEY**: use an API key to connect to any supported provider (OpenAI, Anthropic, Google GenAI, Alibaba Cloud Bailian, and other compatible endpoints).
+- 全局用户配置读取自 `~/.qwen/settings.json`。
+- 工作区配置读取自 `<project>/.qwen/settings.json`。
+- 系统默认配置和系统强制配置可通过 `QWEN_CODE_SYSTEM_DEFAULTS_PATH`、`QWEN_CODE_SYSTEM_SETTINGS_PATH` 指定。
+- desktop 的配置合并顺序与 CLI 对齐：`systemDefaults < user < workspace < system`。
+- 输出语言偏好会写入 `~/.qwen/settings.json` 的 `general.outputLanguage`，并维护 `~/.qwen/output-language.md` 规则文件。
+- Qwen OAuth 会尝试复用 `~/.qwen/oauth_creds.json` 中的持久化凭证。
 
-#### Qwen OAuth (recommended)
+## 开发备注
 
-Start `qwen`, then run:
-
-```bash
-/auth
-```
-
-Choose **Qwen OAuth** and complete the browser flow. Your credentials are cached locally so you usually won't need to log in again.
-
-> **Note:** In non-interactive or headless environments (e.g., CI, SSH, containers), you typically **cannot** complete the OAuth browser login flow. In these cases, please use the API-KEY authentication method.
-
-#### API-KEY (flexible)
-
-Use this if you want more flexibility over which provider and model to use. Supports multiple protocols:
-
-- **OpenAI-compatible**: Alibaba Cloud Bailian, ModelScope, OpenAI, OpenRouter, and other OpenAI-compatible providers
-- **Anthropic**: Claude models
-- **Google GenAI**: Gemini models
-
-The **recommended** way to configure models and providers is by editing `~/.qwen/settings.json` (create it if it doesn't exist). This file lets you define all available models, API keys, and default settings in one place.
-
-##### Quick Setup in 3 Steps
-
-**Step 1:** Create or edit `~/.qwen/settings.json`
-
-Here is a complete example:
-
-```json
-{
-  "modelProviders": {
-    "openai": [
-      {
-        "id": "qwen3-coder-plus",
-        "name": "qwen3-coder-plus",
-        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "description": "Qwen3-Coder via Dashscope",
-        "envKey": "DASHSCOPE_API_KEY"
-      }
-    ]
-  },
-  "env": {
-    "DASHSCOPE_API_KEY": "sk-xxxxxxxxxxxxx"
-  },
-  "security": {
-    "auth": {
-      "selectedType": "openai"
-    }
-  },
-  "model": {
-    "name": "qwen3-coder-plus"
-  }
-}
-```
-
-**Step 2:** Understand each field
-
-| Field                        | What it does                                                                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `modelProviders`             | Declares which models are available and how to connect to them. Keys like `openai`, `anthropic`, `gemini` represent the API protocol. |
-| `modelProviders[].id`        | The model ID sent to the API (e.g. `qwen3-coder-plus`, `gpt-4o`).                                                                     |
-| `modelProviders[].envKey`    | The name of the environment variable that holds your API key.                                                                         |
-| `modelProviders[].baseUrl`   | The API endpoint URL (required for non-default endpoints).                                                                            |
-| `env`                        | A fallback place to store API keys (lowest priority; prefer `.env` files or `export` for sensitive keys).                             |
-| `security.auth.selectedType` | The protocol to use on startup (`openai`, `anthropic`, `gemini`, `vertex-ai`).                                                        |
-| `model.name`                 | The default model to use when Qwen Code starts.                                                                                       |
-
-**Step 3:** Start Qwen Code — your configuration takes effect automatically:
-
-```bash
-qwen
-```
-
-Use the `/model` command at any time to switch between all configured models.
-
-##### More Examples
-
-<details>
-<summary>Coding Plan (Alibaba Cloud Bailian) — fixed monthly fee, higher quotas</summary>
-
-```json
-{
-  "modelProviders": {
-    "openai": [
-      {
-        "id": "qwen3.5-plus",
-        "name": "qwen3.5-plus (Coding Plan)",
-        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
-        "description": "qwen3.5-plus with thinking enabled from Bailian Coding Plan",
-        "envKey": "BAILIAN_CODING_PLAN_API_KEY",
-        "generationConfig": {
-          "extra_body": {
-            "enable_thinking": true
-          }
-        }
-      },
-      {
-        "id": "qwen3-coder-plus",
-        "name": "qwen3-coder-plus (Coding Plan)",
-        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
-        "description": "qwen3-coder-plus from Bailian Coding Plan",
-        "envKey": "BAILIAN_CODING_PLAN_API_KEY"
-      },
-      {
-        "id": "qwen3-coder-next",
-        "name": "qwen3-coder-next (Coding Plan)",
-        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
-        "description": "qwen3-coder-next with thinking enabled from Bailian Coding Plan",
-        "envKey": "BAILIAN_CODING_PLAN_API_KEY",
-        "generationConfig": {
-          "extra_body": {
-            "enable_thinking": true
-          }
-        }
-      },
-      {
-        "id": "glm-4.7",
-        "name": "glm-4.7 (Coding Plan)",
-        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
-        "description": "glm-4.7 with thinking enabled from Bailian Coding Plan",
-        "envKey": "BAILIAN_CODING_PLAN_API_KEY",
-        "generationConfig": {
-          "extra_body": {
-            "enable_thinking": true
-          }
-        }
-      },
-      {
-        "id": "kimi-k2.5",
-        "name": "kimi-k2.5 (Coding Plan)",
-        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
-        "description": "kimi-k2.5 with thinking enabled from Bailian Coding Plan",
-        "envKey": "BAILIAN_CODING_PLAN_API_KEY",
-        "generationConfig": {
-          "extra_body": {
-            "enable_thinking": true
-          }
-        }
-      }
-    ]
-  },
-  "env": {
-    "BAILIAN_CODING_PLAN_API_KEY": "sk-xxxxxxxxxxxxx"
-  },
-  "security": {
-    "auth": {
-      "selectedType": "openai"
-    }
-  },
-  "model": {
-    "name": "qwen3-coder-plus"
-  }
-}
-```
-
-> Subscribe to the Coding Plan and get your API key at [Alibaba Cloud Bailian](https://modelstudio.console.aliyun.com/?tab=dashboard#/efm/coding_plan).
-
-</details>
-
-<details>
-<summary>Multiple providers (OpenAI + Anthropic + Gemini)</summary>
-
-```json
-{
-  "modelProviders": {
-    "openai": [
-      {
-        "id": "gpt-4o",
-        "name": "GPT-4o",
-        "envKey": "OPENAI_API_KEY",
-        "baseUrl": "https://api.openai.com/v1"
-      }
-    ],
-    "anthropic": [
-      {
-        "id": "claude-sonnet-4-20250514",
-        "name": "Claude Sonnet 4",
-        "envKey": "ANTHROPIC_API_KEY"
-      }
-    ],
-    "gemini": [
-      {
-        "id": "gemini-2.5-pro",
-        "name": "Gemini 2.5 Pro",
-        "envKey": "GEMINI_API_KEY"
-      }
-    ]
-  },
-  "env": {
-    "OPENAI_API_KEY": "sk-xxxxxxxxxxxxx",
-    "ANTHROPIC_API_KEY": "sk-ant-xxxxxxxxxxxxx",
-    "GEMINI_API_KEY": "AIzaxxxxxxxxxxxxx"
-  },
-  "security": {
-    "auth": {
-      "selectedType": "openai"
-    }
-  },
-  "model": {
-    "name": "gpt-4o"
-  }
-}
-```
-
-</details>
-
-<details>
-<summary>Enable thinking mode (for supported models like qwen3.5-plus)</summary>
-
-```json
-{
-  "modelProviders": {
-    "openai": [
-      {
-        "id": "qwen3.5-plus",
-        "name": "qwen3.5-plus (thinking)",
-        "envKey": "DASHSCOPE_API_KEY",
-        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "generationConfig": {
-          "extra_body": {
-            "enable_thinking": true
-          }
-        }
-      }
-    ]
-  },
-  "env": {
-    "DASHSCOPE_API_KEY": "sk-xxxxxxxxxxxxx"
-  },
-  "security": {
-    "auth": {
-      "selectedType": "openai"
-    }
-  },
-  "model": {
-    "name": "qwen3.5-plus"
-  }
-}
-```
-
-</details>
-
-> **Tip:** You can also set API keys via `export` in your shell or `.env` files, which take higher priority than `settings.json` → `env`. See the [authentication guide](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/) for full details.
-
-> **Security note:** Never commit API keys to version control. The `~/.qwen/settings.json` file is in your home directory and should stay private.
-
-## Usage
-
-As an open-source terminal agent, you can use Qwen Code in four primary ways:
-
-1. Interactive mode (terminal UI)
-2. Headless mode (scripts, CI)
-3. IDE integration (VS Code, Zed)
-4. TypeScript SDK
-
-#### Interactive mode
-
-```bash
-cd your-project/
-qwen
-```
-
-Run `qwen` in your project folder to launch the interactive terminal UI. Use `@` to reference local files (for example `@src/main.ts`).
-
-#### Headless mode
-
-```bash
-cd your-project/
-qwen -p "your question"
-```
-
-Use `-p` to run Qwen Code without the interactive UI—ideal for scripts, automation, and CI/CD. Learn more: [Headless mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/headless).
-
-#### IDE integration
-
-Use Qwen Code inside your editor (VS Code, Zed, and JetBrains IDEs):
-
-- [Use in VS Code](https://qwenlm.github.io/qwen-code-docs/en/users/integration-vscode/)
-- [Use in Zed](https://qwenlm.github.io/qwen-code-docs/en/users/integration-zed/)
-- [Use in JetBrains IDEs](https://qwenlm.github.io/qwen-code-docs/en/users/integration-jetbrains/)
-
-#### TypeScript SDK
-
-Build on top of Qwen Code with the TypeScript SDK:
-
-- [Use the Qwen Code SDK](./packages/sdk-typescript/README.md)
-
-## Commands & Shortcuts
-
-### Session Commands
-
-- `/help` - Display available commands
-- `/clear` - Clear conversation history
-- `/compress` - Compress history to save tokens
-- `/stats` - Show current session information
-- `/bug` - Submit a bug report
-- `/exit` or `/quit` - Exit Qwen Code
-
-### Keyboard Shortcuts
-
-- `Ctrl+C` - Cancel current operation
-- `Ctrl+D` - Exit (on empty line)
-- `Up/Down` - Navigate command history
-
-> Learn more about [Commands](https://qwenlm.github.io/qwen-code-docs/en/users/features/commands/)
->
-> **Tip**: In YOLO mode (`--yolo`), vision switching happens automatically without prompts when images are detected. Learn more about [Approval Mode](https://qwenlm.github.io/qwen-code-docs/en/users/features/approval-mode/)
-
-## Configuration
-
-Qwen Code can be configured via `settings.json`, environment variables, and CLI flags.
-
-| File                    | Scope         | Description                                                                             |
-| ----------------------- | ------------- | --------------------------------------------------------------------------------------- |
-| `~/.qwen/settings.json` | User (global) | Applies to all your Qwen Code sessions. **Recommended for `modelProviders` and `env`.** |
-| `.qwen/settings.json`   | Project       | Applies only when running Qwen Code in this project. Overrides user settings.           |
-
-The most commonly used top-level fields in `settings.json`:
-
-| Field                        | Description                                                                                          |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `modelProviders`             | Define available models per protocol (`openai`, `anthropic`, `gemini`, `vertex-ai`).                 |
-| `env`                        | Fallback environment variables (e.g. API keys). Lower priority than shell `export` and `.env` files. |
-| `security.auth.selectedType` | The protocol to use on startup (e.g. `openai`).                                                      |
-| `model.name`                 | The default model to use when Qwen Code starts.                                                      |
-
-> See the [Authentication](#api-key-flexible) section above for complete `settings.json` examples, and the [settings reference](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/) for all available options.
-
-## Benchmark Results
-
-### Terminal-Bench Performance
-
-| Agent     | Model              | Accuracy |
-| --------- | ------------------ | -------- |
-| Qwen Code | Qwen3-Coder-480A35 | 37.5%    |
-| Qwen Code | Qwen3-Coder-30BA3B | 31.3%    |
-
-## Ecosystem
-
-Looking for a graphical interface?
-
-- [**AionUi**](https://github.com/iOfficeAI/AionUi) A modern GUI for command-line AI tools including Qwen Code
-- [**Gemini CLI Desktop**](https://github.com/Piebald-AI/gemini-cli-desktop) A cross-platform desktop/web/mobile UI for Qwen Code
-
-## Troubleshooting
-
-If you encounter issues, check the [troubleshooting guide](https://qwenlm.github.io/qwen-code-docs/en/users/support/troubleshooting/).
-
-To report a bug from within the CLI, run `/bug` and include a short title and repro steps.
-
-## Connect with Us
-
-- Discord: https://discord.gg/ycKBjdNd
-- Dingtalk: https://qr.dingtalk.com/action/joingroup?code=v1,k1,+FX6Gf/ZDlTahTIRi8AEQhIaBlqykA0j+eBKKdhLeAE=&_dt_no_comment=1&origin=1
-
-## Acknowledgments
-
-This project is based on [Google Gemini CLI](https://github.com/google-gemini/gemini-cli). We acknowledge and appreciate the excellent work of the Gemini CLI team. Our main contribution focuses on parser-level adaptations to better support Qwen-Coder models.
+- `main` 和 `preload` 分别由 Vite 构建，渲染进程由 Electron Forge 的 Vite renderer 配置启动。
+- 打包配置启用 `asar`，并通过 Electron Fuses 禁用 RunAsNode、Node options 环境变量和 CLI inspect 参数等能力。
+- 桌面包是 private workspace，不作为 npm 包单独发布。
